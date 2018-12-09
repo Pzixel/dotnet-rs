@@ -4,18 +4,49 @@ use goblin::pe::data_directories::DataDirectory;
 use goblin::pe::section_table::SectionTable;
 use std::cmp;
 use scroll::{self, Pread, Pwrite, SizeWith};
+use goblin::container::Endian;
+use scroll::ctx::TryFromCtx;
 
 #[repr(C)]
-#[derive(Debug, PartialEq, Copy, Clone, Default)]
+#[derive(Debug)]
 #[derive(Pread, Pwrite, SizeWith)]
 pub struct CliHeader {
     pub cb: u32,
     pub major_version: u16,
     pub minor_version: u16,
-    pub metadata: u64,
+    pub metadata: DataDirectory,
     pub flags: u32,
     pub entry_point_token: u32,
 }
+
+#[repr(C)]
+#[derive(Debug)]
+struct MetadataRoot<'a> {
+    pub signature: u32,
+    pub major_version: u16,
+    pub minor_version: u16,
+    _reserved: u32,
+    pub length: u32,
+    pub version: &'a str,
+}
+
+impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
+    type Error = scroll::Error;
+    type Size = usize;
+    // and the lifetime annotation on `&'a [u8]` here
+    fn try_from_ctx (src: &'a [u8], endian: Endian)
+                     -> Result<(Self, Self::Size), Self::Error> {
+        let offset = &mut 0;
+        let signature = src.gread_with(offset, endian)?;
+        let major_version = src.gread_with(offset, endian)?;
+        let minor_version = src.gread_with(offset, endian)?;
+        let reserved = src.gread_with(offset, endian)?;
+        let length = src.gread_with(offset, endian)?;
+        let version = src.gread(offset)?;
+        Ok((Self { signature,major_version, minor_version,_reserved: reserved,length, version}, *offset))
+    }
+}
+
 
 fn main() -> Result<(), Error> {
     let path = std::env::args()
@@ -33,22 +64,19 @@ fn main() -> Result<(), Error> {
     let sections = &pe.sections;
 
     let rva = cli_header.virtual_address as usize;
-    let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rvainto offset"))?;
+    let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
     let cli_header_value: CliHeader = file.pread_with(offset, scroll::LE)?;
+
     println!("{:#?}", cli_header_value);
+    let rva = cli_header_value.metadata.virtual_address as usize;
+    let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
+    let root: MetadataRoot = file.pread_with(offset, scroll::LE)?;
+    println!("{:#?}", root);
+
     Ok(())
 }
 
-fn get_section<'a>(pe: &'a PE, header: &DataDirectory) -> Result<&'a SectionTable, Error> {
-    for section in pe.sections.iter() {
-        if header.virtual_address >= section.virtual_address && header.virtual_address < section.virtual_address + header.size {
-            return Ok(&section);
-        }
-    }
-    bail!("Section for address {} was not found", header.virtual_address)
-}
-
-pub fn find_offset (rva: usize, sections: &[SectionTable], file_alignment: u32) -> Option<usize> {
+fn find_offset(rva: usize, sections: &[SectionTable], file_alignment: u32) -> Option<usize> {
     for (i, section) in sections.iter().enumerate() {
         if is_in_section(rva, &section, file_alignment) {
             let offset = rva2offset(rva, &section);
@@ -73,7 +101,7 @@ fn aligned_pointer_to_raw_data(pointer_to_raw_data: usize) -> usize {
     pointer_to_raw_data & !PHYSICAL_ALIGN
 }
 
-pub fn is_in_range (rva: usize, r1: usize, r2: usize) -> bool {
+fn is_in_range (rva: usize, r1: usize, r2: usize) -> bool {
     r1 <= rva && rva < r2
 }
 
