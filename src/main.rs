@@ -52,7 +52,7 @@ fn main() -> Result<(), Error> {
     let path = std::env::args()
         .skip(1)
         .next()
-        .expect("Path to executable was not specified");
+        .ok_or_else(|| err_msg("Path to executable was not specified"))?;
     let file = std::fs::read(path)?;
     let pe = PE::parse(&file)?;
     if pe.header.coff_header.machine != 0x14c {
