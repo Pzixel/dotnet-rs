@@ -1,15 +1,14 @@
-use failure::{bail, Error, err_msg};
-use goblin::pe::PE;
+use failure::{bail, err_msg, Error};
+use goblin::container::Endian;
 use goblin::pe::data_directories::DataDirectory;
 use goblin::pe::section_table::SectionTable;
-use std::cmp;
-use scroll::{self, Pread, Pwrite, SizeWith};
-use goblin::container::Endian;
+use goblin::pe::PE;
 use scroll::ctx::TryFromCtx;
+use scroll::{self, Pread, Pwrite, SizeWith};
+use std::cmp;
 
 #[repr(C)]
-#[derive(Debug)]
-#[derive(Pread, Pwrite, SizeWith)]
+#[derive(Debug, Pread, Pwrite, SizeWith)]
 pub struct CliHeader {
     pub cb: u32,
     pub major_version: u16,
@@ -34,8 +33,7 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
     type Error = scroll::Error;
     type Size = usize;
     // and the lifetime annotation on `&'a [u8]` here
-    fn try_from_ctx (src: &'a [u8], endian: Endian)
-                     -> Result<(Self, Self::Size), Self::Error> {
+    fn try_from_ctx(src: &'a [u8], endian: Endian) -> Result<(Self, Self::Size), Self::Error> {
         let offset = &mut 0;
         let signature = src.gread_with(offset, endian)?;
         let major_version = src.gread_with(offset, endian)?;
@@ -43,10 +41,19 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
         let reserved = src.gread_with(offset, endian)?;
         let length = src.gread_with(offset, endian)?;
         let version = src.gread(offset)?;
-        Ok((Self { signature,major_version, minor_version,_reserved: reserved,length, version}, *offset))
+        Ok((
+            Self {
+                signature,
+                major_version,
+                minor_version,
+                _reserved: reserved,
+                length,
+                version,
+            },
+            *offset,
+        ))
     }
 }
-
 
 fn main() -> Result<(), Error> {
     let path = std::env::args()
@@ -60,7 +67,10 @@ fn main() -> Result<(), Error> {
     }
     let optional_header = pe.header.optional_header.ok_or_else(|| err_msg("No optional header"))?;
     let file_alignment = optional_header.windows_fields.file_alignment;
-    let cli_header = optional_header.data_directories.get_clr_runtime_header().ok_or_else(|| err_msg("No CLI header"))?;
+    let cli_header = optional_header
+        .data_directories
+        .get_clr_runtime_header()
+        .ok_or_else(|| err_msg("No CLI header"))?;
     let sections = &pe.sections;
 
     let rva = cli_header.virtual_address as usize;
@@ -80,19 +90,23 @@ fn find_offset(rva: usize, sections: &[SectionTable], file_alignment: u32) -> Op
     for (i, section) in sections.iter().enumerate() {
         if is_in_section(rva, &section, file_alignment) {
             let offset = rva2offset(rva, &section);
-            return Some(offset)
+            return Some(offset);
         }
     }
     None
 }
 
-fn rva2offset (rva: usize, section: &SectionTable) -> usize {
+fn rva2offset(rva: usize, section: &SectionTable) -> usize {
     (rva - section.virtual_address as usize) + aligned_pointer_to_raw_data(section.pointer_to_raw_data as usize)
 }
 
-fn is_in_section (rva: usize, section: &SectionTable, file_alignment: u32) -> bool {
+fn is_in_section(rva: usize, section: &SectionTable, file_alignment: u32) -> bool {
     let section_rva = section.virtual_address as usize;
-    is_in_range(rva, section_rva, section_rva + section_read_size(section, file_alignment))
+    is_in_range(
+        rva,
+        section_rva,
+        section_rva + section_read_size(section, file_alignment),
+    )
 }
 
 #[inline]
@@ -101,7 +115,7 @@ fn aligned_pointer_to_raw_data(pointer_to_raw_data: usize) -> usize {
     pointer_to_raw_data & !PHYSICAL_ALIGN
 }
 
-fn is_in_range (rva: usize, r1: usize, r2: usize) -> bool {
+fn is_in_range(rva: usize, r1: usize, r2: usize) -> bool {
     r1 <= rva && rva < r2
 }
 
@@ -116,7 +130,8 @@ fn section_read_size(section: &SectionTable, file_alignment: u32) -> usize {
     let size_of_raw_data = section.size_of_raw_data as usize;
     let virtual_size = section.virtual_size as usize;
     let read_size = {
-        let read_size = (section.pointer_to_raw_data as usize + size_of_raw_data + file_alignment - 1) & !(file_alignment - 1);
+        let read_size =
+            (section.pointer_to_raw_data as usize + size_of_raw_data + file_alignment - 1) & !(file_alignment - 1);
         cmp::min(read_size, round_size(size_of_raw_data))
     };
 
