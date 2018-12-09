@@ -12,6 +12,9 @@ pub struct CliHeader {
     pub cb: u32,
     pub major_version: u16,
     pub minor_version: u16,
+    pub metadata: u64,
+    pub flags: u32,
+    pub entry_point_token: u32,
 }
 
 fn main() -> Result<(), Error> {
