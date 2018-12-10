@@ -221,6 +221,10 @@ fn main() -> Result<(), Error> {
     let offset = offset + root.stream_headers.iter().find(|x| x.name == "#~").unwrap().offset as usize;
     let tilda_stream: TildaStream = file.pread_with(offset, scroll::LE)?;
     println!("{:#?}", tilda_stream);
+
+    let offset = offset + root.stream_headers.iter().find(|x| x.name == "#Strings").unwrap().offset as usize;
+    let name: &str = file.pread(offset - 4)?;
+    println!("{}", name);
     Ok(())
 }
 
