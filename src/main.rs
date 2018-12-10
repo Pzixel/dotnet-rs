@@ -27,6 +27,17 @@ struct MetadataRoot<'a> {
     _reserved: u32,
     pub length: u32,
     pub version: &'a str,
+    pub flags: u16,
+    pub streams: u16,
+    pub stream_headers: Vec<StreamHeader<'a>>
+}
+
+#[repr(C)]
+#[derive(Debug)]
+struct StreamHeader<'a> {
+    pub offset: u32,
+    pub size: u32,
+    pub name: &'a str
 }
 
 impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
@@ -41,6 +52,20 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
         let reserved = src.gread_with(offset, endian)?;
         let length = src.gread_with(offset, endian)?;
         let version = src.gread(offset)?;
+        let padding = 4 - *offset % 4;
+        if padding < 4 {
+            *offset += padding;
+        }
+        let flags = src.gread_with(offset, endian)?;
+        let streams: u16 = src.gread_with(offset, endian)?;
+        let mut stream_headers = Vec::with_capacity(streams as usize);
+        for _ in 0..streams {
+            stream_headers.push( src.gread(offset)?);
+            let padding = 4 - *offset % 4;
+            if padding < 4 {
+                *offset += padding;
+            }
+        }
         Ok((
             Self {
                 signature,
@@ -49,6 +74,29 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
                 _reserved: reserved,
                 length,
                 version,
+                flags,
+                streams,
+                stream_headers
+            },
+            *offset,
+        ))
+    }
+}
+
+impl<'a> TryFromCtx<'a, Endian> for StreamHeader<'a> {
+    type Error = scroll::Error;
+    type Size = usize;
+    // and the lifetime annotation on `&'a [u8]` here
+    fn try_from_ctx(src: &'a [u8], endian: Endian) -> Result<(Self, Self::Size), Self::Error> {
+        let offset = &mut 0;
+        let offset_field = src.gread_with(offset, endian)?;
+        let size = src.gread_with(offset, endian)?;
+        let name = src.gread(offset)?;
+        Ok((
+            Self {
+                offset: offset_field,
+                size,
+                name
             },
             *offset,
         ))
@@ -82,12 +130,13 @@ fn main() -> Result<(), Error> {
     let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
     let root: MetadataRoot = file.pread_with(offset, scroll::LE)?;
     println!("{:#?}", root);
+    println!("{:#?}", root.stream_headers.len());
 
     Ok(())
 }
 
 fn find_offset(rva: usize, sections: &[SectionTable], file_alignment: u32) -> Option<usize> {
-    for (i, section) in sections.iter().enumerate() {
+    for section in sections {
         if is_in_section(rva, &section, file_alignment) {
             let offset = rva2offset(rva, &section);
             return Some(offset);
