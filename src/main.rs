@@ -29,7 +29,7 @@ struct MetadataRoot<'a> {
     pub version: &'a str,
     pub flags: u16,
     pub streams: u16,
-    pub stream_headers: Vec<StreamHeader<'a>>
+    pub stream_headers: Vec<StreamHeader<'a>>,
 }
 
 #[repr(C)]
@@ -37,7 +37,7 @@ struct MetadataRoot<'a> {
 struct StreamHeader<'a> {
     pub offset: u32,
     pub size: u32,
-    pub name: &'a str
+    pub name: &'a str,
 }
 
 impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
@@ -60,7 +60,7 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
         let streams: u16 = src.gread_with(offset, endian)?;
         let mut stream_headers = Vec::with_capacity(streams as usize);
         for _ in 0..streams {
-            stream_headers.push( src.gread(offset)?);
+            stream_headers.push(src.gread(offset)?);
             let padding = 4 - *offset % 4;
             if padding < 4 {
                 *offset += padding;
@@ -76,7 +76,7 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
                 version,
                 flags,
                 streams,
-                stream_headers
+                stream_headers,
             },
             *offset,
         ))
@@ -96,11 +96,23 @@ impl<'a> TryFromCtx<'a, Endian> for StreamHeader<'a> {
             Self {
                 offset: offset_field,
                 size,
-                name
+                name,
             },
             *offset,
         ))
     }
+}
+
+#[repr(C)]
+#[derive(Debug, Pread, Pwrite, SizeWith)]
+pub struct TildaStream {
+    _reserved: u32,
+    pub major_version: u8,
+    pub minor_version: u8,
+    pub heap_sizes: u8,
+    _reserved2: u8,
+    pub valid: u64,
+    pub sorted: u64,
 }
 
 fn main() -> Result<(), Error> {
@@ -130,8 +142,10 @@ fn main() -> Result<(), Error> {
     let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
     let root: MetadataRoot = file.pread_with(offset, scroll::LE)?;
     println!("{:#?}", root);
-    println!("{:#?}", root.stream_headers.len());
 
+    let offset = offset + root.stream_headers.iter().find(|x| x.name == "#~").unwrap().offset as usize;
+    let tilda_stream: TildaStream = file.pread_with(offset, scroll::LE)?;
+    println!("{:#?}", tilda_stream);
     Ok(())
 }
 
