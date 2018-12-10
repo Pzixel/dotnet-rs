@@ -6,6 +6,7 @@ use goblin::pe::PE;
 use scroll::ctx::TryFromCtx;
 use scroll::{self, Pread, Pwrite, SizeWith};
 use std::cmp;
+use std::collections::HashMap;
 
 #[repr(C)]
 #[derive(Debug, Pread, Pwrite, SizeWith)]
@@ -104,7 +105,7 @@ impl<'a> TryFromCtx<'a, Endian> for StreamHeader<'a> {
 }
 
 #[repr(C)]
-#[derive(Debug, Pread, Pwrite, SizeWith)]
+#[derive(Debug)]
 pub struct TildaStream {
     _reserved: u32,
     pub major_version: u8,
@@ -113,6 +114,46 @@ pub struct TildaStream {
     _reserved2: u8,
     pub valid: u64,
     pub sorted: u64,
+    pub rows: Vec<(u32, u32)>
+}
+
+impl<'a> TryFromCtx<'a, Endian> for TildaStream {
+    type Error = scroll::Error;
+    type Size = usize;
+    // and the lifetime annotation on `&'a [u8]` here
+    fn try_from_ctx(src: &'a [u8], endian: Endian) -> Result<(Self, Self::Size), Self::Error> {
+        let offset = &mut 0;
+        let _reserved = src.gread_with(offset, endian)?;
+        let major_version = src.gread_with(offset, endian)?;
+        let minor_version = src.gread_with(offset, endian)?;
+        let heap_sizes = src.gread_with(offset, endian)?;
+        let _reserved2 = src.gread_with(offset, endian)?;
+        let valid = src.gread_with(offset, endian)?;
+        let sorted = src.gread_with(offset, endian)?;
+        let mut rows = Vec::new();
+
+        let mut j = 1;
+        for i in 0..64_u32 {
+            if valid & j == j {
+                let count = src.gread_with(offset, endian)?;
+                rows.push((i, count));
+            }
+            j <<= 1;
+        }
+        Ok((
+            Self {
+                _reserved,
+                major_version,
+                minor_version,
+                heap_sizes,
+                _reserved2,
+                valid,
+                sorted,
+                rows
+            },
+            *offset,
+        ))
+    }
 }
 
 fn main() -> Result<(), Error> {
