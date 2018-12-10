@@ -6,7 +6,6 @@ use goblin::pe::PE;
 use scroll::ctx::TryFromCtx;
 use scroll::{self, Pread, Pwrite, SizeWith};
 use std::cmp;
-use std::collections::HashMap;
 
 #[repr(C)]
 #[derive(Debug, Pread, Pwrite, SizeWith)]
@@ -67,6 +66,7 @@ impl<'a> TryFromCtx<'a, Endian> for MetadataRoot<'a> {
                 *offset += padding;
             }
         }
+
         Ok((
             Self {
                 signature,
@@ -114,7 +114,8 @@ pub struct TildaStream {
     _reserved2: u8,
     pub valid: u64,
     pub sorted: u64,
-    pub rows: Vec<(u32, u32)>
+    pub rows: Vec<(u32, u32)>,
+    pub methods: Vec<MethodDef>,
 }
 
 impl<'a> TryFromCtx<'a, Endian> for TildaStream {
@@ -140,6 +141,27 @@ impl<'a> TryFromCtx<'a, Endian> for TildaStream {
             }
             j <<= 1;
         }
+
+        let table_sizes = [
+            10_u32, 6, 14, 0, 6, 0, 14, 0, // 0x00 - 0x07
+            6, 0, 6, 0, 6, 0, 0, 0,    // 0x08 - 0x0f
+            0, 2, 0, 0, 0, 0, 0, 0,    // 0x10 - 0x17
+            0, 0, 0, 0, 0, 0, 0, 0,    // 0x18 - 0x1f
+            22, 0, 0, 20               // 0x20 - 0x23
+        ];
+
+        let mut methods = Vec::new();
+
+        for (i, count) in rows.iter().cloned() {
+            if i == 6 {
+                for _ in 0..count {
+                    methods.push(src.gread(offset)?);
+                }
+            } else {
+                *offset += (table_sizes[i as usize] * count) as usize;
+            }
+        }
+
         Ok((
             Self {
                 _reserved,
@@ -149,11 +171,23 @@ impl<'a> TryFromCtx<'a, Endian> for TildaStream {
                 _reserved2,
                 valid,
                 sorted,
-                rows
+                rows,
+                methods
             },
             *offset,
         ))
     }
+}
+
+#[repr(C, packed)]
+#[derive(Debug, Pread, Pwrite, SizeWith)]
+pub struct MethodDef {
+    pub rva: u32,
+    pub impl_flags: u16,
+    pub flags: u16,
+    pub name: u16,
+    pub signature: u16,
+    pub param_list: u16
 }
 
 fn main() -> Result<(), Error> {
