@@ -157,6 +157,8 @@ impl<'a> TryFromCtx<'a, Endian> for TildaStream {
                 for _ in 0..count {
                     methods.push(src.gread(offset)?);
                 }
+            } else if i >= table_sizes.len() as u32 {
+                break
             } else {
                 *offset += (table_sizes[i as usize] * count) as usize;
             }
