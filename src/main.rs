@@ -4,11 +4,11 @@ use goblin::pe::data_directories::DataDirectory;
 use goblin::pe::section_table::SectionTable;
 use goblin::pe::PE;
 use scroll::ctx::TryFromCtx;
-use scroll::{self, Pread, Pwrite, SizeWith};
+use scroll::{self, Pread};
 use std::cmp;
 
 #[repr(C)]
-#[derive(Debug, Pread, Pwrite, SizeWith)]
+#[derive(Debug, Pread)]
 pub struct CliHeader {
     pub cb: u32,
     pub major_version: u16,
@@ -180,7 +180,7 @@ impl<'a> TryFromCtx<'a, Endian> for TildaStream {
 }
 
 #[repr(C, packed)]
-#[derive(Debug, Pread, Pwrite, SizeWith)]
+#[derive(Debug, Copy, Clone, Pread)]
 pub struct MethodDef {
     pub rva: u32,
     pub impl_flags: u16,
@@ -214,17 +214,17 @@ fn main() -> Result<(), Error> {
 
     println!("{:#?}", cli_header_value);
     let rva = cli_header_value.metadata.virtual_address as usize;
-    let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
-    let root: MetadataRoot = file.pread_with(offset, scroll::LE)?;
+    let metadata_root_offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
+    let root: MetadataRoot = file.pread_with(metadata_root_offset, scroll::LE)?;
     println!("{:#?}", root);
 
-    let offset = offset + root.stream_headers.iter().find(|x| x.name == "#~").unwrap().offset as usize;
+    let offset = metadata_root_offset + root.stream_headers.iter().find(|x| x.name == "#~").unwrap().offset as usize;
     let tilda_stream: TildaStream = file.pread_with(offset, scroll::LE)?;
     println!("{:#?}", tilda_stream);
 
-    let offset = offset + root.stream_headers.iter().find(|x| x.name == "#Strings").unwrap().offset as usize;
-    let name: &str = file.pread(offset - 4)?;
-    println!("{}", name);
+    let offset = metadata_root_offset + root.stream_headers.iter().find(|x| x.name == "#Strings").unwrap().offset as usize;
+    let name: &str = file.pread(offset + tilda_stream.methods.first().unwrap().name as usize)?;
+    println!("Entry point name: {}", name);
     Ok(())
 }
 
