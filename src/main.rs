@@ -2,10 +2,10 @@ use failure::{bail, err_msg, Error};
 use goblin::container::Endian;
 use goblin::pe::data_directories::DataDirectory;
 use goblin::pe::section_table::SectionTable;
-use goblin::pe::PE;
 use scroll::ctx::TryFromCtx;
 use scroll::{self, Pread};
 use std::cmp;
+use goblin::pe::PE;
 
 #[repr(C)]
 #[derive(Debug, Pread)]
@@ -225,8 +225,12 @@ fn main() -> Result<(), Error> {
     println!("{:#?}", tilda_stream);
 
     let offset = metadata_root_offset + root.stream_headers.iter().find(|x| x.name == "#Strings").unwrap().offset as usize;
-    let name: &str = file.pread(offset + tilda_stream.methods.first().unwrap().name as usize)?;
+    let name: &str = file.pread(offset + tilda_stream.methods[(cli_header_value.entry_point_token & 0x00ffffff - 1) as usize].name as usize)?;
     println!("Entry point name: {}", name);
+    println!("Table id: {}", cli_header_value.entry_point_token >> 24);
+    println!("{}", cli_header_value.entry_point_token & 0xFFFFFF);
+    let names = tilda_stream.methods.iter().map(|x| file.pread(offset + x.name as usize).unwrap()).collect::<Vec<&str>>();
+    println!("{:?}", names.iter().position(|x| x == &"Main"));
     Ok(())
 }
 
