@@ -1,11 +1,11 @@
 use failure::{bail, err_msg, Error};
 use goblin::container::Endian;
 use goblin::pe::data_directories::DataDirectory;
-use goblin::pe::section_table::SectionTable;
 use scroll::ctx::TryFromCtx;
 use scroll::{self, Pread};
-use std::cmp;
 use goblin::pe::PE;
+use goblin::pe::utils::find_offset;
+use goblin::pe::utils::get_data;
 
 #[repr(C)]
 #[derive(Debug, Pread)]
@@ -210,9 +210,7 @@ fn main() -> Result<(), Error> {
         .ok_or_else(|| err_msg("No CLI header"))?;
     let sections = &pe.sections;
 
-    let rva = cli_header.virtual_address as usize;
-    let offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
-    let cli_header_value: CliHeader = file.pread_with(offset, scroll::LE)?;
+    let cli_header_value: CliHeader = get_data(&file, sections, &cli_header, file_alignment)?;
 
     println!("{:#?}", cli_header_value);
     let rva = cli_header_value.metadata.virtual_address as usize;
@@ -232,60 +230,4 @@ fn main() -> Result<(), Error> {
     let names = tilda_stream.methods.iter().map(|x| file.pread(offset + x.name as usize).unwrap()).collect::<Vec<&str>>();
     println!("{:?}", names.iter().position(|x| x == &"Main"));
     Ok(())
-}
-
-fn find_offset(rva: usize, sections: &[SectionTable], file_alignment: u32) -> Option<usize> {
-    for section in sections {
-        if is_in_section(rva, &section, file_alignment) {
-            let offset = rva2offset(rva, &section);
-            return Some(offset);
-        }
-    }
-    None
-}
-
-fn rva2offset(rva: usize, section: &SectionTable) -> usize {
-    (rva - section.virtual_address as usize) + aligned_pointer_to_raw_data(section.pointer_to_raw_data as usize)
-}
-
-fn is_in_section(rva: usize, section: &SectionTable, file_alignment: u32) -> bool {
-    let section_rva = section.virtual_address as usize;
-    is_in_range(
-        rva,
-        section_rva,
-        section_rva + section_read_size(section, file_alignment),
-    )
-}
-
-#[inline]
-fn aligned_pointer_to_raw_data(pointer_to_raw_data: usize) -> usize {
-    const PHYSICAL_ALIGN: usize = 0x1ff;
-    pointer_to_raw_data & !PHYSICAL_ALIGN
-}
-
-fn is_in_range(rva: usize, r1: usize, r2: usize) -> bool {
-    r1 <= rva && rva < r2
-}
-
-#[inline]
-fn section_read_size(section: &SectionTable, file_alignment: u32) -> usize {
-    fn round_size(size: usize) -> usize {
-        const PAGE_MASK: usize = 0xfff;
-        (size + PAGE_MASK) & !PAGE_MASK
-    }
-
-    let file_alignment = file_alignment as usize;
-    let size_of_raw_data = section.size_of_raw_data as usize;
-    let virtual_size = section.virtual_size as usize;
-    let read_size = {
-        let read_size =
-            (section.pointer_to_raw_data as usize + size_of_raw_data + file_alignment - 1) & !(file_alignment - 1);
-        cmp::min(read_size, round_size(size_of_raw_data))
-    };
-
-    if virtual_size == 0 {
-        read_size
-    } else {
-        cmp::min(read_size, round_size(virtual_size))
-    }
 }
