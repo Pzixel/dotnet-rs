@@ -1,11 +1,10 @@
 use failure::{bail, err_msg, Error};
 use goblin::container::Endian;
 use goblin::pe::data_directories::DataDirectory;
+use goblin::pe::utils::{find_offset, get_data};
+use goblin::pe::PE;
 use scroll::ctx::TryFromCtx;
 use scroll::{self, Pread};
-use goblin::pe::PE;
-use goblin::pe::utils::find_offset;
-use goblin::pe::utils::get_data;
 
 #[repr(C)]
 #[derive(Debug, Pread)]
@@ -158,7 +157,7 @@ impl<'a> TryFromCtx<'a, Endian> for TildaStream {
                     methods.push(src.gread(offset)?);
                 }
             } else if i >= table_sizes.len() as u32 {
-                break
+                break;
             } else {
                 *offset += (table_sizes[i as usize] * count) as usize;
             }
@@ -174,7 +173,7 @@ impl<'a> TryFromCtx<'a, Endian> for TildaStream {
                 valid,
                 sorted,
                 rows,
-                methods
+                methods,
             },
             *offset,
         ))
@@ -189,7 +188,7 @@ pub struct MethodDef {
     pub flags: u16,
     pub name: u16,
     pub signature: u16,
-    pub param_list: u16
+    pub param_list: u16,
 }
 
 fn main() -> Result<(), Error> {
@@ -214,7 +213,8 @@ fn main() -> Result<(), Error> {
 
     println!("{:#?}", cli_header_value);
     let rva = cli_header_value.metadata.virtual_address as usize;
-    let metadata_root_offset = find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
+    let metadata_root_offset =
+        find_offset(rva, sections, file_alignment).ok_or(err_msg("Cannot map rva into offset"))?;
     let root: MetadataRoot = file.pread_with(metadata_root_offset, scroll::LE)?;
     println!("{:#?}", root);
 
@@ -222,12 +222,24 @@ fn main() -> Result<(), Error> {
     let tilda_stream: TildaStream = file.pread_with(offset, scroll::LE)?;
     println!("{:#?}", tilda_stream);
 
-    let offset = metadata_root_offset + root.stream_headers.iter().find(|x| x.name == "#Strings").unwrap().offset as usize;
-    let name: &str = file.pread(offset + tilda_stream.methods[(cli_header_value.entry_point_token & 0x00ffffff - 1) as usize].name as usize)?;
+    let offset = metadata_root_offset
+        + root
+            .stream_headers
+            .iter()
+            .find(|x| x.name == "#Strings")
+            .unwrap()
+            .offset as usize;
+    let name: &str = file.pread(
+        offset + tilda_stream.methods[(cli_header_value.entry_point_token & 0x00ffffff - 1) as usize].name as usize,
+    )?;
     println!("Entry point name: {}", name);
     println!("Table id: {}", cli_header_value.entry_point_token >> 24);
     println!("{}", cli_header_value.entry_point_token & 0xFFFFFF);
-    let names = tilda_stream.methods.iter().map(|x| file.pread(offset + x.name as usize).unwrap()).collect::<Vec<&str>>();
+    let names = tilda_stream
+        .methods
+        .iter()
+        .map(|x| file.pread(offset + x.name as usize).unwrap())
+        .collect::<Vec<&str>>();
     println!("{:?}", names.iter().position(|x| x == &"Main"));
     Ok(())
 }
